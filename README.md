@@ -69,12 +69,13 @@ Edit the config section at the top of `ami-replicate.sh`:
 
 ```bash
 SOURCE_REGION="us-west-2"
-SOURCE_INSTANCE_ID="i-XXXXXXXXXXXXXXXXX"    # ← your instance ID
+SOURCE_INSTANCE_ID="i-061cf1117e96a63e0"    # Oregon instance
+SOURCE_PROFILE="aws-tbd"                    # AWS CLI profile for source account
 
 COPY_REGIONS=("us-east-1" "us-east-2" "us-west-1")
 
-TARGET_ACCOUNT_ID="123456789012"             # ← Account B
-TARGET_PROFILE="account-b"                   # ← AWS CLI named profile
+TARGET_ACCOUNT_ID="379810014062"             # Account B (aws-4)
+TARGET_PROFILE="aws-4"                       # AWS CLI profile for account B
 TARGET_REGION="us-west-2"
 
 AMI_PREFIX="openclaw"
@@ -108,12 +109,12 @@ On the Linux server where the script runs:
 # AWS CLI v2
 aws --version
 
-# Default profile — Account A (source)
-aws configure
+# Source account profile (aws-tbd, 360529135522)
+aws configure --profile aws-tbd
 # → access key, secret key, region=us-west-2
 
-# Named profile — Account B (target)
-aws configure --profile account-b
+# Target account profile (aws-4, 379810014062)
+aws configure --profile aws-4
 # → Account B's access key, secret key
 
 # Required IAM permissions (both accounts):

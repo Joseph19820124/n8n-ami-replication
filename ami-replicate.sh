@@ -18,14 +18,15 @@ set -euo pipefail
 
 # ─────────────────────────────── Config ───────────────────────────────
 SOURCE_REGION="us-west-2"
-SOURCE_INSTANCE_ID="i-XXXXXXXXXXXXXXXXX"          # ← Oregon instance ID
+SOURCE_INSTANCE_ID="i-061cf1117e96a63e0"           # Oregon instance
+SOURCE_PROFILE="aws-tbd"                           # AWS CLI profile for source account (360529135522)
 
 # Same-account target regions
 COPY_REGIONS=("us-east-1" "us-east-2" "us-west-1")
 
 # Cross-account
-TARGET_ACCOUNT_ID="123456789012"                   # ← Account B's 12-digit ID
-TARGET_PROFILE="account-b"                         # ← AWS CLI profile for account B
+TARGET_ACCOUNT_ID="379810014062"                   # Account B (aws-4)
+TARGET_PROFILE="aws-4"                             # AWS CLI profile for account B
 TARGET_REGION="us-west-2"                          # region to copy into in account B
 
 # AMI naming
@@ -90,6 +91,7 @@ else
 
     log "Creating AMI '$AMI_NAME' from $SOURCE_INSTANCE_ID in $SOURCE_REGION..."
     AMI_ID=$(aws ec2 create-image \
+        --profile "$SOURCE_PROFILE" \
         --region "$SOURCE_REGION" \
         --instance-id "$SOURCE_INSTANCE_ID" \
         --name "$AMI_NAME" \
@@ -102,7 +104,7 @@ else
 fi
 
 # ──────────────────────── Step 2: Wait for AMI ────────────────────────
-wait_ami_available "$SOURCE_REGION" "$AMI_ID"
+wait_ami_available "$SOURCE_REGION" "$AMI_ID" "$SOURCE_PROFILE"
 
 # ──────────────────── Step 3: Same-account copies ─────────────────────
 declare -A COPY_AMI_IDS   # region -> ami-id
@@ -110,6 +112,7 @@ declare -A COPY_AMI_IDS   # region -> ami-id
 log "Starting same-account copies to: ${COPY_REGIONS[*]}"
 for region in "${COPY_REGIONS[@]}"; do
     copy_id=$(aws ec2 copy-image \
+        --profile "$SOURCE_PROFILE" \
         --source-region "$SOURCE_REGION" \
         --source-image-id "$AMI_ID" \
         --region "$region" \
@@ -125,6 +128,7 @@ done
 # ──────────────── Step 4: Cross-account share + copy ──────────────────
 log "Sharing $AMI_ID with account $TARGET_ACCOUNT_ID..."
 aws ec2 modify-image-attribute \
+    --profile "$SOURCE_PROFILE" \
     --region "$SOURCE_REGION" \
     --image-id "$AMI_ID" \
     --launch-permission "Add=[{UserId=$TARGET_ACCOUNT_ID}]" \
@@ -132,6 +136,7 @@ aws ec2 modify-image-attribute \
 
 # Also share the underlying snapshot(s)
 SNAPSHOT_IDS=$(aws ec2 describe-images \
+    --profile "$SOURCE_PROFILE" \
     --region "$SOURCE_REGION" \
     --image-ids "$AMI_ID" \
     --query 'Images[0].BlockDeviceMappings[*].Ebs.SnapshotId' --output text)
@@ -140,6 +145,7 @@ for snap_id in $SNAPSHOT_IDS; do
     [[ "$snap_id" == "None" ]] && continue
     log "Sharing snapshot $snap_id with account $TARGET_ACCOUNT_ID..."
     aws ec2 modify-snapshot-attribute \
+        --profile "$SOURCE_PROFILE" \
         --region "$SOURCE_REGION" \
         --snapshot-id "$snap_id" \
         --attribute createVolumePermission \
@@ -165,7 +171,7 @@ log "  $TARGET_REGION (account B) → $CROSS_AMI_ID (copy started)"
 log "Waiting for all copies to complete..."
 
 for region in "${COPY_REGIONS[@]}"; do
-    wait_ami_available "$region" "${COPY_AMI_IDS[$region]}" &
+    wait_ami_available "$region" "${COPY_AMI_IDS[$region]}" "$SOURCE_PROFILE" &
 done
 wait_ami_available "$TARGET_REGION" "$CROSS_AMI_ID" "$TARGET_PROFILE" &
 
@@ -223,11 +229,11 @@ if (( KEEP_COUNT > 0 )); then
     log "Cleaning up old AMIs (keeping latest $KEEP_COUNT)..."
 
     # Source region
-    cleanup_old_amis "$SOURCE_REGION"
+    cleanup_old_amis "$SOURCE_REGION" "$SOURCE_PROFILE"
 
     # Copy regions
     for region in "${COPY_REGIONS[@]}"; do
-        cleanup_old_amis "$region"
+        cleanup_old_amis "$region" "$SOURCE_PROFILE"
     done
 
     # Cross-account
