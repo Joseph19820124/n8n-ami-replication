@@ -39,9 +39,25 @@ MAX_WAIT=1800             # 30 min max wait for AMI to become available
 # Retention (0 = skip cleanup)
 KEEP_COUNT=3              # keep latest N AMIs per region, delete older ones
 
+# n8n callback
+CALLBACK_URL="https://josephchen.app.n8n.cloud/webhook/ami-callback"
+
 # ─────────────────────────────── Helpers ──────────────────────────────
 log()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
-die()  { log "ERROR: $*"; exit "${2:-1}"; }
+
+notify() {
+    local status="$1" summary="$2"
+    curl -sf -X POST "$CALLBACK_URL" \
+        -H "Content-Type: application/json" \
+        -d "{\"status\":\"$status\",\"summary\":\"$summary\"}" \
+        >/dev/null 2>&1 || true
+}
+
+die() {
+    log "ERROR: $1"
+    notify "FAILED" "$1"
+    exit "${2:-1}"
+}
 
 wait_ami_available() {
     local region="$1" ami_id="$2" profile="${3:-}"
@@ -247,3 +263,11 @@ for region in "${COPY_REGIONS[@]}"; do
     log "  Copy:           ${COPY_AMI_IDS[$region]} ($region)"
 done
 log "  Cross-account:  $CROSS_AMI_ID ($TARGET_REGION, account B)"
+
+# ──────────────────────────── Callback ────────────────────────────────
+SUMMARY="Source: $AMI_ID ($SOURCE_REGION)"
+for region in "${COPY_REGIONS[@]}"; do
+    SUMMARY="$SUMMARY | $region: ${COPY_AMI_IDS[$region]}"
+done
+SUMMARY="$SUMMARY | Cross-account: $CROSS_AMI_ID ($TARGET_REGION)"
+notify "SUCCESS" "$SUMMARY"
